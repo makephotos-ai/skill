@@ -155,6 +155,8 @@ Response:
 }
 ```
 
+Generation takes 10-20 seconds. The endpoint has a 60-second timeout.
+
 ### Remove Background
 
 ```bash
@@ -162,6 +164,8 @@ curl -X POST "https://makephotos.ai/api/v1/remove-bg?key=$MAKEPHOTOS_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{ "image_url": "https://res.cloudinary.com/.../image.jpg" }'
 ```
+
+Costs 10 credits per image. The `image_url` must be a Cloudinary URL.
 
 ### Check Credits
 
@@ -182,17 +186,69 @@ Response:
 }
 ```
 
+### Upload (Direct)
+
+For small files (up to ~4.5 MB). Uses multipart/form-data, not JSON.
+
+```bash
+curl -X POST "https://makephotos.ai/api/v1/upload?key=$MAKEPHOTOS_API_KEY" \
+  -F "file=@./photo.jpg"
+```
+
+Response:
+
+```json
+{
+  "image_url": "https://res.cloudinary.com/.../photo.jpg"
+}
+```
+
+### Upload (Signed, for Large Files)
+
+For larger files, get signed Cloudinary upload params first, then upload directly to Cloudinary.
+
+Step 1 -- Get signed params:
+
+```bash
+curl -s "https://makephotos.ai/api/v1/upload/signed?key=$MAKEPHOTOS_API_KEY"
+```
+
+Response:
+
+```json
+{
+  "signature": "...",
+  "timestamp": 1713200000,
+  "api_key": "...",
+  "cloud_name": "...",
+  "folder": "makephotos/inputs/..."
+}
+```
+
+Step 2 -- Upload to Cloudinary using those params:
+
+```bash
+curl -X POST "https://api.cloudinary.com/v1_1/{cloud_name}/image/upload" \
+  -F "file=@./photo.jpg" \
+  -F "api_key={api_key}" \
+  -F "timestamp={timestamp}" \
+  -F "signature={signature}" \
+  -F "folder={folder}"
+```
+
+The `secure_url` from Cloudinary's response is your `image_url` for the generate endpoint. Uploads do not consume credits.
+
 ## Parameters Reference
 
 ### Generate Parameters
 
 | Parameter | Required | Values |
 |-----------|----------|--------|
-| `imageUrl` / `image_url` | Yes | URL of the source image |
-| `type` | Yes | `product` |
+| `imageUrl` / `image_url` | Yes | URL of the source image (must be publicly accessible) |
+| `type` | Yes | `product` (only enabled type currently) |
 | `style` | Yes | `studio`, `amazon`, `luxury`, `lifestyle` |
-| `aspectRatio` / `aspect_ratio` | No | `1:1`, `4:3`, `3:4`, `16:9`, `9:16` |
-| `resolution` | No | `1K`, `2K`, `4K` |
+| `aspectRatio` / `aspect_ratio` | No | `1:1` (default), `4:3`, `3:4`, `16:9`, `9:16` |
+| `resolution` | No | `1K` (default), `2K`, `4K` |
 | `prompt` | No | Custom prompt to override the default style prompt |
 
 ### Styles
@@ -201,6 +257,14 @@ Response:
 - **amazon** — Optimized for Amazon product listings (white background, centered)
 - **luxury** — Premium feel with dramatic lighting and rich textures
 - **lifestyle** — Product in a natural, lifestyle context
+
+### Credit Costs
+
+- **Generate:** 1 credit base cost, multiplied by resolution (1K = 1x, 2K = 2x, 4K = 4x). A 4K generation costs 4 credits.
+- **Remove background:** 10 credits flat per image.
+- **Upload:** Free (no credits consumed).
+
+There are no rate limits. Credits are the throttle.
 
 ## Error Handling
 
@@ -239,8 +303,9 @@ MakePhotos uses a credit-based system. Each generation consumes credits from you
 - **Tiers:** starter, pro, max, ultra
 - **Pools:** monthly (resets each billing cycle) + top-up (purchased separately, never expire)
 - Monthly credits are consumed first, then top-up credits
+- **Subscription status:** `active`, `trialing`, `past_due`, `canceled`
 
-Always check credits before running batch generation jobs. If credits run out mid-batch, the API returns `insufficient_credits` (402).
+Always check credits before running batch generation jobs. If credits run out mid-batch, the API returns `insufficient_credits` (402). If a generation fails server-side, credits are automatically refunded.
 
 ## Constraints
 
